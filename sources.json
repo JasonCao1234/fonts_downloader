@@ -1,0 +1,12 @@
+{
+  "_doc": "字体源配置。目前内置 acgrip（Anime 字幕论坛字体站）。如果还有别的同款目录站（形如 https://站点/?dir=xxx 的列表页），照着加一条即可：name 唯一、base 结尾带斜杠、index 是该源的索引缓存文件名。",
+  "sources": [
+    {
+      "name": "acgrip",
+      "label": "Anime字幕论坛字体站",
+      "base": "https://pan.acgrip.com/",
+      "index": "acgrip_index.json",
+      "enabled": true
+    }
+  ]
+}

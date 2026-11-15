@@ -1,0 +1,1004 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ASS 字体助手 · ass-font-fetch</title>
+<style>
+  :root{
+    --bg:#0f1216; --bg2:#151a21; --panel:#171d26; --line:#232c39; --line2:#2e3a4b;
+    --txt:#e6edf5; --dim:#8b98a9; --dim2:#6b7787;
+    --acc:#4da3ff; --acc2:#2b7fd4; --ok:#3ecf8e; --warn:#f5b301; --err:#ff6b6b;
+    --mono:"Cascadia Mono","JetBrains Mono",Consolas,"Courier New",monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;background:radial-gradient(1200px 600px at 15% -10%,#1b2838 0%,var(--bg) 55%) fixed;
+    color:var(--txt);font:14px/1.55 "Segoe UI","Microsoft YaHei",system-ui,sans-serif;
+    display:flex;flex-direction:column;overflow:hidden;
+  }
+  header{
+    display:flex;align-items:center;gap:14px;padding:12px 18px;
+    background:rgba(15,18,22,.82);border-bottom:1px solid var(--line);
+    backdrop-filter:blur(10px);flex:0 0 auto;
+  }
+  .brand{display:flex;align-items:center;gap:10px;font-weight:650;font-size:15px;letter-spacing:.2px}
+  .brand .dot{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;
+    background:linear-gradient(135deg,var(--acc),#7d5cff);color:#fff;font-size:14px;font-weight:800}
+  .sub{color:var(--dim);font-size:12px}
+  .badge{display:inline-flex;align-items:center;gap:6px;padding:4px 9px;border-radius:999px;
+    border:1px solid var(--line2);background:#11161d;color:var(--dim);font-size:12px;white-space:nowrap}
+  .badge b{color:var(--txt);font-weight:600}
+  .badge.ok{border-color:#1f5c45;color:#9fe6c4;background:#10231c}
+  .badge.warn{border-color:#5c4a12;color:#f6d88a;background:#241d0d}
+  .spacer{flex:1}
+  .status{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--dim)}
+  .pulse{width:8px;height:8px;border-radius:50%;background:var(--dim2)}
+  .pulse.run{background:var(--ok);box-shadow:0 0 0 0 rgba(62,207,142,.6);animation:p 1.6s infinite}
+  @keyframes p{0%{box-shadow:0 0 0 0 rgba(62,207,142,.55)}70%{box-shadow:0 0 0 9px rgba(62,207,142,0)}100%{box-shadow:0 0 0 0 rgba(62,207,142,0)}}
+  button{font:inherit;color:var(--txt);background:#1d2530;border:1px solid var(--line2);
+    border-radius:9px;padding:7px 13px;cursor:pointer;transition:.15s;white-space:nowrap}
+  button:hover{border-color:#3d4e66;background:#222c39}
+  button:active{transform:translateY(1px)}
+  button:disabled{opacity:.45;cursor:not-allowed;transform:none}
+  button.primary{background:linear-gradient(135deg,var(--acc2),var(--acc));border-color:#2f7fd0;color:#fff;font-weight:600}
+  button.primary:hover{filter:brightness(1.08)}
+  button.ghost{background:transparent}
+  button.danger{border-color:#5a2b2b;color:#ffb3b3;background:#241417}
+  button.small{padding:4px 9px;font-size:12px;border-radius:7px}
+  main{flex:1;display:grid;grid-template-columns:minmax(360px,430px) 1fr;gap:14px;padding:14px;overflow:hidden}
+  .panel{background:linear-gradient(180deg,rgba(23,29,38,.96),rgba(19,24,31,.96));
+    border:1px solid var(--line);border-radius:14px;display:flex;flex-direction:column;overflow:hidden;
+    box-shadow:0 10px 30px rgba(0,0,0,.25)}
+  .panel .hd{display:flex;align-items:center;gap:8px;padding:11px 14px;border-bottom:1px solid var(--line);
+    font-weight:600;font-size:13px;color:#cdd9e6}
+  .panel .hd .n{width:19px;height:19px;border-radius:6px;background:#22303f;color:#9fc7f5;
+    display:grid;place-items:center;font-size:11px;font-weight:700}
+  .panel .bd{padding:13px 14px;overflow:auto}
+  .form .bd{display:flex;flex-direction:column;gap:13px}
+  .field label{display:block;font-size:12px;color:var(--dim);margin-bottom:5px}
+  .row{display:flex;gap:7px;align-items:center}
+  .row input[type=text]{flex:1;min-width:0;background:#0d1116;border:1px solid var(--line2);color:var(--txt);
+    border-radius:9px;padding:8px 10px;font:13px/1.4 var(--mono);outline:none}
+  .row input[type=text]:focus{border-color:var(--acc2);box-shadow:0 0 0 2px rgba(77,163,255,.15)}
+  .row input[readonly]{color:#b9c7d8}
+  .hint{font-size:11.5px;color:var(--dim2);margin-top:4px}
+  .dirlist{display:flex;flex-direction:column;gap:6px}
+  .diritem{display:flex;gap:6px;align-items:center;background:#111721;border:1px solid var(--line);
+    border-radius:9px;padding:6px 8px;font:12.5px/1.4 var(--mono);color:#b9c7d8;word-break:break-all}
+  .diritem span{flex:1;min-width:0}
+  .opts{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .opt{background:#111721;border:1px solid var(--line);border-radius:10px;padding:8px 10px;display:block}
+  .opt.sel label{display:block;font-size:11.5px;color:var(--dim);margin-bottom:5px}
+  .opt.chk{display:grid;grid-template-columns:16px 1fr;gap:1px 8px;align-items:start;cursor:pointer}
+  .opt.chk:hover{border-color:#31405a}
+  .opt.chk input{margin:3px 0 0;accent-color:var(--acc)}
+  .opt.chk .t{font-size:12.5px;color:#c3cfdd;line-height:1.35}
+  .opt.chk .d{grid-column:2;color:var(--dim2);font-size:11px;line-height:1.3}
+  select{width:100%;background:#0d1116;border:1px solid var(--line2);color:var(--txt);border-radius:9px;
+    padding:7px 9px;font:13px/1.4 inherit;outline:none}
+  .actions{display:flex;gap:8px;margin-top:auto;padding-top:6px}
+  .actions button{flex:1;padding:10px 12px}
+  .out{flex:1;display:flex;flex-direction:column;overflow:hidden}
+  .result{flex:0 0 auto;max-height:46%;overflow:auto;padding:12px 14px;border-bottom:1px solid var(--line)}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:9px;margin-bottom:10px}
+  .card{background:#111721;border:1px solid var(--line);border-radius:11px;padding:9px 11px}
+  .card .k{font-size:11px;color:var(--dim2)}
+  .card .v{font-size:19px;font-weight:700;margin-top:2px;font-variant-numeric:tabular-nums}
+  .card.ok .v{color:var(--ok)} .card.warn .v{color:var(--warn)} .card.err .v{color:var(--err)}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th,td{text-align:left;padding:6px 8px;border-bottom:1px solid #1c2431;vertical-align:top}
+  th{color:var(--dim2);font-weight:600;font-size:11.5px;position:sticky;top:0;background:#121821}
+  td.mono{font-family:var(--mono);font-size:11.5px;color:#a9b8c9;word-break:break-all}
+  .tag{display:inline-block;padding:1px 7px;border-radius:999px;font-size:11px;border:1px solid transparent}
+  .tag.ok{background:#10231c;color:#8fe3bd;border-color:#1f5c45}
+  .tag.no{background:#241417;color:#ffb3b3;border-color:#5a2b2b}
+  .tag.wait{background:#1b2230;color:#9fc7f5;border-color:#2e3a4b}
+  .logwrap{flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:120px}
+  .logbar{display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid var(--line);font-size:12px;color:var(--dim)}
+  .logbar .grow{flex:1}
+  .bar{height:3px;background:#0c1116;border-radius:3px;overflow:hidden}
+  .bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--acc2),var(--acc));transition:width .35s}
+  .bar.indet i{width:40%;animation:ind 1.2s infinite ease-in-out}
+  @keyframes ind{0%{margin-left:-40%}100%{margin-left:100%}}
+  .log{flex:1;overflow:auto;padding:10px 14px;font:12px/1.55 var(--mono);color:#b6c3d2;white-space:pre-wrap;word-break:break-word}
+  .log .l-phase{color:#8ecbff;font-weight:600}
+  .log .l-warn{color:var(--warn)}
+  .log .l-err{color:var(--err)}
+  .log .l-dim{color:var(--dim2)}
+  .empty{color:var(--dim2);font-size:12.5px;text-align:center;padding:18px 8px}
+  .modal{position:fixed;inset:0;background:rgba(5,8,12,.72);display:none;place-items:center;z-index:50;backdrop-filter:blur(3px)}
+  .modal.on{display:grid}
+  .dlg{width:min(760px,92vw);height:min(560px,84vh);background:var(--panel);border:1px solid var(--line2);
+    border-radius:14px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 30px 80px rgba(0,0,0,.5)}
+  .dlg .hd{padding:12px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px}
+  .dlg .hd b{font-size:13px}
+  .dlg .hd .x{margin-left:auto}
+  .dlg .path{padding:9px 14px;border-bottom:1px solid var(--line);display:flex;gap:7px}
+  .dlg .path input{flex:1;background:#0d1116;border:1px solid var(--line2);color:var(--txt);
+    border-radius:8px;padding:7px 9px;font:12.5px/1.4 var(--mono);outline:none}
+  .dlg .list{flex:1;overflow:auto;padding:6px 8px}
+  .ent{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:8px;cursor:pointer;font-size:13px}
+  .ent:hover{background:#1d2530}
+  .ent .ico{width:18px;text-align:center;color:#9fc7f5}
+  .ent.file .ico{color:#c9b6ff}
+  .dlg .ft{padding:10px 14px;border-top:1px solid var(--line);display:flex;gap:8px;align-items:center}
+  .dlg .ft .sel{flex:1;font:12px var(--mono);color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:#2a1a1c;border:1px solid #5a2b2b;
+    color:#ffc9c9;padding:9px 15px;border-radius:10px;font-size:13px;opacity:0;pointer-events:none;transition:.25s;z-index:80}
+  .toast.on{opacity:1;transform:translateX(-50%) translateY(-4px)}
+  .tabs{display:flex;gap:6px;padding:10px 14px 0}
+  .tab{flex:1;background:#111721;border:1px solid var(--line);border-radius:9px;padding:7px 10px;
+    font-size:12.5px;color:var(--dim);cursor:pointer}
+  .tab:hover{color:#cdd9e6;border-color:#2e3a4b}
+  .tab.on{background:#1b2531;border-color:var(--acc2);color:#dcecff;font-weight:600}
+  .hidden{display:none !important}
+  .pane{display:flex;flex-direction:column;gap:13px}
+  .searchbar{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--dim)}
+  .searchlist{min-height:130px;max-height:300px;overflow:auto;border:1px solid var(--line);
+    border-radius:10px;background:#0e141b}
+  .srow{display:grid;grid-template-columns:18px 1fr auto;gap:2px 8px;padding:6px 9px;
+    border-bottom:1px solid #1a2230;cursor:pointer;align-items:center}
+  .srow:hover{background:#151d27}
+  .srow input{margin:0;accent-color:var(--acc)}
+  .srow .fname{font-size:12.5px;color:#d6e2ef;word-break:break-all}
+  .srow .spath{grid-column:2;font:11px var(--mono);color:var(--dim2);word-break:break-all}
+  .srow .score{font-size:11px;color:#9fc7f5;background:#16202d;border:1px solid #26333f;
+    border-radius:999px;padding:1px 7px;white-space:nowrap}
+  .progress{padding:9px 14px 11px;border-bottom:1px solid var(--line);display:none}
+  .progress.on{display:block}
+  .ptop{display:flex;justify-content:space-between;font-size:12px;color:var(--dim);margin-bottom:6px}
+  .ptop b{color:var(--txt)}
+  .pfiles{margin-top:8px;display:flex;flex-direction:column;gap:5px;max-height:132px;overflow:auto}
+  .pf{display:grid;grid-template-columns:1fr auto;gap:2px 8px;font-size:11.5px}
+  .pf .n{color:#c3cfdd;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .pf .s{color:var(--dim2);font-variant-numeric:tabular-nums}
+  .pf .b{grid-column:1/-1;height:4px;background:#0c1116;border-radius:3px;overflow:hidden}
+  .pf .b i{display:block;height:100%;width:0;background:linear-gradient(90deg,#2b7fd4,#4da3ff);transition:width .2s}
+  .pf.done .b i{background:linear-gradient(90deg,#2f9e6f,#3ecf8e)}
+  .pf.fail .b i{background:#b4433f}
+  @media (max-width:1020px){ main{grid-template-columns:1fr;grid-template-rows:auto 1fr} .form{max-height:52vh} }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><span class="dot">字</span>ASS 字体助手<span class="sub">ass-font-fetch</span></div>
+  <div class="badge" id="idxBadge">索引：读取中…</div>
+  <div class="spacer"></div>
+  <div class="status"><span class="pulse" id="pulse"></span><span id="statusText">空闲</span></div>
+  <button class="ghost small" id="btnDiag">诊断</button>
+  <button class="ghost small" id="btnStop" disabled>停止</button>
+  <button class="ghost small" id="btnQuit">关闭</button>
+</header>
+
+<main>
+  <section class="panel form">
+    <div class="hd"><span class="n">1</span>输入
+      <span class="spacer" style="flex:1"></span>
+      <span class="badge" id="idmBadge">IDM：检测中</span>
+    </div>
+    <div class="tabs">
+      <button class="tab on" data-tab="scan">扫描字幕</button>
+      <button class="tab" data-tab="search">搜索字体</button>
+    </div>
+    <div class="bd">
+      <div class="pane" id="paneScan">
+        <div class="field">
+          <label>字幕目录（递归扫描 .ass / .ssa）</label>
+          <div class="row">
+            <input type="text" id="assDir" placeholder="例如 D:\动漫\某番\Subs">
+            <button data-pick="assDir">浏览</button>
+            <button class="ghost" data-native="assDir" title="用系统对话框选择">…</button>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>或：导入字幕包（本地 zip 或下载链接）</label>
+          <div class="row">
+            <input type="text" id="zipSrc" placeholder="例如 https://secure.assrt.net/download/182242/….zip 或 D:\subs.zip">
+            <button id="btnImport">导入并分析</button>
+          </div>
+          <div class="hint">自动解压 .zip（含嵌套 zip）里的 .ass/.ssa 到临时目录，再当字幕目录扫描。</div>
+        </div>
+
+        <div class="field">
+          <label>已有字体文件夹（可选，可加多个）</label>
+          <div class="dirlist" id="fontList"></div>
+          <div class="row" style="margin-top:7px">
+            <button class="small" id="btnAddFont">+ 添加字体文件夹</button>
+          </div>
+          <div class="hint">按字体文件内部名称识别，不看文件名；留空则只比对系统字体。</div>
+        </div>
+      </div>
+
+      <div class="pane hidden" id="paneSearch">
+        <div class="field">
+          <label>输入字体名搜索（中英文都行，支持模糊匹配）</label>
+          <div class="row">
+            <input type="text" id="searchQ" placeholder="例如 方正兰亭黑 / 思源宋体 / Roboto">
+            <button class="primary" id="btnSearch">搜索</button>
+          </div>
+        </div>
+        <div class="searchbar">
+          <select id="sourceSel" style="width:auto;min-width:150px;padding:4px 8px;font-size:11.5px" title="字体源"></select>
+          <span id="searchInfo">输入名字后点搜索</span>
+          <span class="spacer" style="flex:1"></span>
+          <button class="ghost small" id="btnSelAll">全选</button>
+          <button class="ghost small" id="btnSelNone">清空</button>
+        </div>
+        <div class="searchlist" id="searchList"></div>
+        <div class="actions" id="actionsSearch">
+          <button class="primary" id="btnDlSel">下载选中</button>
+          <button id="btnIdmSel">用 IDM 下载</button>
+          <button id="btnExportSel">导出链接</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>下载保存到（一个文件夹，不存在会自动新建）</label>
+        <div class="row">
+          <input type="text" id="outDir" placeholder="例如 E:\FontPack\_missing">
+          <button data-pick="outDir">浏览</button>
+          <button class="ghost" data-native="outDir" title="用系统对话框选择">…</button>
+          <button class="ghost" data-open="outDir" title="在资源管理器中打开">↗</button>
+        </div>
+      </div>
+
+      <div class="hd" style="padding:2px 0;border:0;color:#a9b8c9"><span class="n">2</span>选项</div>
+      <div class="opts">
+        <div class="opt sel">
+          <label for="scope">搜索范围</label>
+          <select id="scope">
+            <option value="lite">精简包 + LPSub（推荐）</option>
+            <option value="full">整站（含完整包）</option>
+          </select>
+        </div>
+        <div class="opt sel">
+          <label for="variants">字重策略</label>
+          <select id="variants">
+            <option value="base">只下基准字重</option>
+            <option value="all">同族全部字重</option>
+          </select>
+        </div>
+      </div>
+      <div class="opts">
+        <label class="opt chk"><input type="checkbox" id="optSystem" checked><span class="t">读取系统已装字体</span><span class="d">关闭后只认字体文件夹</span></label>
+        <label class="opt chk"><input type="checkbox" id="optTree"><span class="t">保留站点目录层级</span><span class="d">默认平铺到输出目录</span></label>
+        <label class="opt chk"><input type="checkbox" id="optForce"><span class="t">已存在也重新下载</span><span class="d">覆盖输出目录里的同名文件</span></label>
+        <label class="opt chk"><input type="checkbox" id="optRefresh"><span class="t">重建站内索引</span><span class="d">较慢，索引过期时才需要</span></label>
+      </div>
+
+      <div class="field">
+        <label>别名表 JSON（可选）</label>
+        <div class="row">
+          <input type="text" id="aliases" placeholder="字幕名 ↔ 站点文件名的映射，一般不用填">
+          <button data-pick="aliases" data-mode="file">选择</button>
+        </div>
+      </div>
+
+      <div class="actions" id="actionsScan">
+        <button id="btnDry">仅分析（不下载）</button>
+        <button class="primary" id="btnRun">开始下载</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel out">
+    <div class="hd"><span class="n">3</span>结果
+      <span class="spacer" style="flex:1"></span>
+      <button class="ghost small" id="btnIdmAll" disabled>全部加入 IDM</button>
+      <button class="ghost small" id="btnLinkAll" disabled>导出链接</button>
+      <button class="ghost small" id="btnReport" disabled>导出报告</button>
+      <button class="ghost small" id="btnOpenOut" disabled>打开输出目录</button>
+    </div>
+    <div class="progress" id="progBox">
+      <div class="ptop"><span id="progText">等待开始</span><span id="progBytes"></span></div>
+      <div class="bar"><i id="progFill"></i></div>
+      <div class="pfiles" id="pfiles"></div>
+    </div>
+    <div class="result" id="result">
+      <div class="empty" id="emptyHint">选好目录后点「仅分析」看看缺什么，或直接「开始下载」。<br>缺失的字体只会从 pan.acgrip.com 下载。</div>
+    </div>
+    <div class="logwrap">
+      <div class="logbar"><span class="grow">运行日志</span><button class="ghost small" id="btnClearLog">清空</button></div>
+      <div class="bar" id="progBar"><i></i></div>
+      <div class="log" id="log"></div>
+    </div>
+  </section>
+</main>
+
+<div class="modal" id="picker">
+  <div class="dlg">
+    <div class="hd"><b id="pickTitle">选择文件夹</b><span class="badge" id="pickMode">目录</span>
+      <button class="ghost small x" id="pickClose">✕</button></div>
+    <div class="path">
+      <button class="ghost small" id="pickUp">↑ 上一级</button>
+      <input type="text" id="pickPath" spellcheck="false">
+      <button class="ghost small" id="pickGo">转到</button>
+    </div>
+    <div class="list" id="pickList"></div>
+    <div class="ft">
+      <span class="sel" id="pickSel"></span>
+      <button class="ghost small" id="pickShort">快捷位置</button>
+      <button class="ghost small" id="pickCancel">取消</button>
+      <button class="primary small" id="pickOk">选择此文件夹</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<div class="modal" id="stale">
+  <div class="dlg" style="height:auto;max-width:580px">
+    <div class="hd"><b>这个页面已失效</b></div>
+    <div style="padding:16px 18px;font-size:13px;line-height:1.75;color:#c3cfdd">
+      <p id="staleMsg" style="margin:0 0 10px">页面连接的本地服务已经变了（服务被重启过，或者开了多个实例）。</p>
+      <p style="margin:0 0 12px">请<strong>关掉这个标签页</strong>，重新双击 <b>start_gui.bat</b>（或重新运行 <code>python gui_server.py</code>），
+      用新弹出的地址打开。旧页面不会自动恢复。</p>
+      <div class="actions"><button class="primary" onclick="location.reload()">重新加载本页</button></div>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="diag">
+  <div class="dlg" style="height:auto;max-width:760px">
+    <div class="hd"><b>诊断信息</b><span class="spacer" style="flex:1"></span>
+      <button class="ghost small" id="diagClose">✕</button></div>
+    <pre id="diagBody" style="margin:0;padding:14px 16px;font:12px/1.6 var(--mono);color:#c3cfdd;white-space:pre-wrap;max-height:62vh;overflow:auto"></pre>
+  </div>
+</div>
+
+<script>
+const TOKEN = "__TOKEN__";
+const PAGE_VERSION = "__VERSION__";
+const $ = (id) => document.getElementById(id);
+function showStale(msg) {
+  if (msg) $("staleMsg").textContent = msg;
+  $("stale").classList.add("on");
+}
+const api = async (path, opts = {}) => {
+  const r = await fetch(path, {
+    ...opts,
+    headers: { "X-Token": TOKEN, "Content-Type": "application/json", ...(opts.headers || {}) },
+  });
+  if (r.status === 403) {
+    showStale("本地服务拒绝了请求：这个页面里的令牌已经失效（通常是服务重启过，或同时开了多个实例）。");
+  }
+  return r;
+};
+$("diagClose").onclick = () => $("diag").classList.remove("on");
+
+// ---------- 状态持久化 ----------
+const LS = "assFontFetch.gui.v1";
+let state = {
+  ass_dir: "", out_dir: "", font_dirs: [], scope: "lite", variants: "base",
+  no_system: false, keep_tree: false, force: false, refresh_index: false, aliases: ""
+};
+try { Object.assign(state, JSON.parse(localStorage.getItem(LS) || "{}")); } catch (e) {}
+// 兼容早期版本误把 DOM id 当键存下的记录
+if (!state.ass_dir && state.assDir) state.ass_dir = state.assDir;
+if (!state.out_dir && state.outDir) state.out_dir = state.outDir;
+const saveState = () => localStorage.setItem(LS, JSON.stringify(state));
+
+function toast(msg, ms = 3200) {
+  const el = $("toast"); el.textContent = msg; el.classList.add("on");
+  clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove("on"), ms);
+}
+
+// ---------- 表单 <-> 状态 ----------
+function bind(id, key, event = "input") {
+  const el = $(id);
+  const set = () => { state[key] = el.type === "checkbox" ? el.checked : el.value; saveState(); };
+  if (el.type === "checkbox") el.checked = !!state[key]; else el.value = state[key] || "";
+  el.addEventListener(event, set);
+}
+bind("assDir", "ass_dir");
+bind("outDir", "out_dir");
+bind("aliases", "aliases");
+bind("scope", "scope", "change");
+bind("variants", "variants", "change");
+const checks = { optSystem: ["no_system", v => !v], optTree: ["keep_tree"], optForce: ["force"], optRefresh: ["refresh_index"] };
+for (const [id, [key, invert]] of Object.entries(checks)) {
+  const el = $(id);
+  el.checked = invert ? !state[key] : !!state[key];
+  el.addEventListener("change", () => {
+    state[key] = invert ? !el.checked : el.checked;
+    saveState();
+  });
+}
+
+function renderFontList() {
+  const box = $("fontList");
+  box.innerHTML = "";
+  if (!state.font_dirs.length) {
+    const d = document.createElement("div");
+    d.className = "hint"; d.textContent = "还没有添加字体文件夹";
+    box.appendChild(d); return;
+  }
+  state.font_dirs.forEach((dir, i) => {
+    const row = document.createElement("div"); row.className = "diritem";
+    const s = document.createElement("span"); s.textContent = dir;
+    const b = document.createElement("button"); b.className = "ghost small"; b.textContent = "×";
+    b.title = "移除"; b.onclick = () => { state.font_dirs.splice(i, 1); saveState(); renderFontList(); };
+    row.append(s, b); box.appendChild(row);
+  });
+}
+renderFontList();
+
+$("btnAddFont").onclick = () => pick("dir", state.font_dirs[state.font_dirs.length - 1] || "", "添加字体文件夹", (p) => {
+  if (p && !state.font_dirs.includes(p)) { state.font_dirs.push(p); saveState(); renderFontList(); }
+});
+
+// ---------- 目录选择器 ----------
+let pickCb = null, pickMode = "dir", pickCurrent = null, pickSelected = null;
+function pick(mode, initial, title, cb) {
+  pickMode = mode; pickCb = cb; pickSelected = null; pickCurrent = null;
+  $("picker").classList.add("on");
+  $("pickTitle").textContent = title || (mode === "file" ? "选择文件" : "选择文件夹");
+  $("pickMode").textContent = mode === "file" ? "文件" : "目录";
+  $("pickOk").textContent = mode === "file" ? "选择此文件" : "选择此文件夹";
+  $("pickOk").disabled = true;
+  loadDir(initial || "", true);
+}
+function closePick() { $("picker").classList.remove("on"); pickCb = null; }
+$("pickClose").onclick = closePick; $("pickCancel").onclick = closePick;
+$("picker").addEventListener("click", (e) => { if (e.target.id === "picker") closePick(); });
+
+async function loadDir(path, fallbackRoot) {
+  try {
+    const r = await api(`/api/browse?path=${encodeURIComponent(path)}&mode=${pickMode}`);
+    const d = await r.json();
+    if (d.error) { toast(d.error); if (fallbackRoot && path) loadDir(""); return; }
+    pickCurrent = d.path;
+    if (d.path) state.__lastDir = d.path;
+    $("pickPath").value = d.path || "(此电脑)";
+    $("pickSel").textContent = d.path
+      ? d.path
+      : (pickMode === "file" ? "请先进入文件夹，再点文件" : "先点进一个文件夹，再点「选择此文件夹」");
+    renderEntries(d);
+  } catch (e) { toast("读取目录失败：" + e); }
+}
+function renderEntries(d) {
+  const box = $("pickList"); box.innerHTML = "";
+  if (d.shortcuts && d.shortcuts.length && !d.path) {
+    const head = document.createElement("div"); head.className = "hint";
+    head.textContent = "快捷位置"; head.style.padding = "4px 9px"; box.appendChild(head);
+    d.shortcuts.forEach(s => {
+      const el = document.createElement("div"); el.className = "ent";
+      el.innerHTML = `<span class="ico">★</span><span></span>`;
+      el.lastChild.textContent = s.name + "  ·  " + s.path;
+      el.onclick = () => loadDir(s.path); box.appendChild(el);
+    });
+  }
+  if (d.entries.length) {
+    const head = document.createElement("div"); head.className = "hint";
+    head.textContent = d.path ? "子文件夹" : "驱动器"; head.style.padding = "4px 9px"; box.appendChild(head);
+  }
+  d.entries.forEach(e => {
+    const el = document.createElement("div");
+    el.className = "ent " + (e.type === "dir" ? "dir" : "file");
+    el.innerHTML = `<span class="ico">${e.type === "dir" ? "▸" : "◆"}</span><span></span>`;
+    el.lastChild.textContent = e.name;
+    el.onclick = () => {
+      if (e.type === "dir") { loadDir(e.path); }
+      else { pickSelected = e.path; $("pickSel").textContent = e.path; }
+    };
+    if (e.type === "file" && pickSelected === e.path) el.style.background = "#1d2530";
+    box.appendChild(el);
+  });
+  $("pickUp").disabled = !d.parent;
+  $("pickUp").onclick = () => loadDir(d.parent || "");
+  $("pickOk").disabled = pickMode === "file" ? !pickSelected : !pickCurrent;
+}
+$("pickGo").onclick = () => loadDir($("pickPath").value.trim());
+$("pickPath").addEventListener("keydown", (e) => { if (e.key === "Enter") loadDir($("pickPath").value.trim()); });
+$("pickShort").onclick = () => loadDir("");
+$("pickOk").onclick = () => {
+  const chosen = pickMode === "file" ? pickSelected : pickCurrent;
+  if (!chosen) { toast("请先选择一个" + (pickMode === "file" ? "文件" : "文件夹")); return; }
+  const cb = pickCb; closePick(); if (cb) cb(chosen);
+};
+
+// DOM id 与状态键不同名，统一在这里换算（之前这里把 id 当成了键，导致选完仍报“先选输出目录”）
+const FIELD_KEY = { assDir: "ass_dir", outDir: "out_dir", aliases: "aliases" };
+function applyPick(id, path) {
+  const key = FIELD_KEY[id] || id;
+  state[key] = path;
+  saveState();
+  const el = $(id);
+  if (el) { el.value = path; el.style.borderColor = "#2f7fd0"; setTimeout(() => { el.style.borderColor = ""; }, 1200); }
+}
+
+document.querySelectorAll("[data-pick]").forEach(btn => {
+  btn.onclick = () => {
+    const field = btn.dataset.pick, mode = btn.dataset.mode || "dir";
+    pick(mode, state[FIELD_KEY[field]] || "", mode === "file" ? "选择文件" : "选择文件夹", (p) => {
+      applyPick(field, p);
+      toast("已选择：" + p, 2200);
+    });
+  };
+});
+document.querySelectorAll("[data-native]").forEach(btn => {
+  btn.onclick = async () => {
+    const field = btn.dataset.native;
+    try {
+      const r = await api("/api/pick", { method: "POST", body: JSON.stringify({ initial: state[FIELD_KEY[field]] || "", title: "选择文件夹" }) });
+      const d = await r.json();
+      if (d.error) { toast(d.error); return; }
+      if (d.path) { applyPick(field, d.path); toast("已选择：" + d.path, 2200); }
+      else toast("没有选到文件夹（对话框被取消，或系统不允许弹出）");
+    } catch (e) { toast("系统对话框不可用：" + e); }
+  };
+});
+document.querySelectorAll("[data-open]").forEach(btn => {
+  btn.onclick = async () => {
+    const p = state[FIELD_KEY[btn.dataset.open]];
+    if (!p) { toast("还没有选择目录"); return; }
+    const r = await api("/api/open", { method: "POST", body: JSON.stringify({ path: p }) });
+    const d = await r.json(); if (d.error) toast(d.error);
+  };
+});
+
+// ---------- 日志 / 结果 ----------
+let since = 0, timer = null, running = false, lastResult = null;
+function addLog(lines) {
+  const box = $("log");
+  const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
+  for (const raw of lines) {
+    const div = document.createElement("div");
+    const t = String(raw);
+    if (/^\s*==/.test(t)) div.className = "l-phase";
+    else if (/^\s*!/.test(t) || /下载失败|未找到|失败/.test(t)) div.className = "l-warn";
+    else if (/错误|Traceback|ERR/.test(t)) div.className = "l-err";
+    else if (/^\s{2}/.test(t)) div.className = "l-dim";
+    div.textContent = t;
+    box.appendChild(div);
+  }
+  while (box.childElementCount > 3000) box.firstChild.remove();
+  if (atBottom) box.scrollTop = box.scrollHeight;
+}
+$("btnClearLog").onclick = () => { $("log").innerHTML = ""; };
+
+function setProgress(lines) {
+  let pct = null;
+  for (const l of lines) {
+    const m = /==\s*(\d)\/4/.exec(l);
+    if (m) pct = [0, 18, 40, 72, 94][Number(m[1])] || pct;
+  }
+  const bar = $("progBar");
+  if (pct === null) return;
+  bar.classList.remove("indet");
+  bar.firstElementChild.style.width = pct + "%";
+}
+function setRunning(on, text) {
+  running = on;
+  $("btnDry").disabled = on; $("btnRun").disabled = on; $("btnStop").disabled = !on;
+  $("pulse").className = "pulse" + (on ? " run" : "");
+  $("statusText").textContent = text || (on ? "运行中…" : "空闲");
+  const bar = $("progBar");
+  if (on) { bar.classList.add("indet"); bar.firstElementChild.style.width = ""; }
+  else { bar.classList.remove("indet"); bar.firstElementChild.style.width = "100%"; }
+}
+
+async function poll() {
+  try {
+    const r = await api(`/api/log?since=${since}`);
+    const d = await r.json();
+    if (d.error) { toast(d.error); return; }
+    if (d.lines && d.lines.length) { addLog(d.lines); setProgress(d.lines); }
+    if (d.progress) renderProgress(d.progress);
+    since = d.next || since;
+    if (!d.running && running) {
+      finish(d);
+    }
+    if (!d.running && !running && d.result && !lastResult) finish(d, true);
+  } catch (e) { /* 忽略轮询错误 */ }
+}
+function startPoll() {
+  if (timer) clearInterval(timer);
+  timer = setInterval(poll, 700);
+}
+function stopPoll() { if (timer) { clearInterval(timer); timer = null; } }
+
+function finish(d, silent) {
+  stopPoll();
+  setRunning(false, d.exit_code === 0 ? "完成" : "结束（有未完成项）");
+  if (d.result) { lastResult = d.result; renderResult(d.result, d.dry_run); }
+  const paths = lastPaths();
+  $("btnIdmAll").disabled = !paths.length;
+  $("btnLinkAll").disabled = !paths.length;
+  if (!silent) {
+    if (d.exit_code === 0) toast("全部搞定 ✓", 2600);
+    else if (d.exit_code === 3) toast("有字体没找到或下载失败，看结果区", 4200);
+  }
+}
+
+function renderDirect(rep) {
+  const out = $("result");
+  const dl = rep.downloads || [];
+  const ok = dl.filter(x => x.status === "downloaded").length;
+  const exist = dl.filter(x => x.status === "exists").length;
+  const fail = dl.filter(x => x.status === "failed").length;
+  const cards = `<div class="cards">
+      <div class="card"><div class="k">选中字体</div><div class="v">${dl.length}</div></div>
+      <div class="card ok"><div class="k">已下载</div><div class="v">${ok}</div></div>
+      <div class="card"><div class="k">已存在</div><div class="v">${exist}</div></div>
+      <div class="card ${fail ? "err" : ""}"><div class="k">失败</div><div class="v">${fail}</div></div>
+    </div>`;
+  const rows = dl.map(x => {
+    const tag = x.status === "downloaded" ? '<span class="tag ok">已下载</span>'
+      : x.status === "exists" ? '<span class="tag ok">已存在</span>'
+      : x.status === "failed" ? '<span class="tag no">失败</span>' : '<span class="tag wait">跳过</span>';
+    return `<tr><td>${esc(x.name || "")}</td><td>${tag}</td><td class="mono">${esc(x.file || "")}</td></tr>`;
+  }).join("");
+  out.innerHTML = cards + `<table><thead><tr><th style="width:38%">文件</th><th style="width:14%">状态</th><th>保存位置</th></tr></thead><tbody>${rows}</tbody></table>`;
+  $("btnOpenOut").disabled = !dl.length;
+  $("btnReport").disabled = false;
+}
+
+function renderResult(rep, isDry) {
+  $("emptyHint") && $("emptyHint").remove();
+  if (rep.mode === "direct") { renderDirect(rep); return; }
+  const out = $("result");
+  const downloads = rep.downloads || [];
+  const okCount = downloads.filter(x => x.status === "downloaded").length;
+  const existCount = downloads.filter(x => x.status === "exists").length;
+  const failCount = downloads.filter(x => x.status === "failed").length;
+  const matched = rep.matched || {};
+  const notFound = rep.not_found || [];
+  const missing = rep.missing || [];
+
+  const cards = `
+    <div class="cards">
+      <div class="card"><div class="k">字幕文件</div><div class="v">${rep.ass_files ?? 0}</div></div>
+      <div class="card"><div class="k">用到字体</div><div class="v">${Object.keys(rep.fonts_used || {}).length}</div></div>
+      <div class="card warn"><div class="k">缺失</div><div class="v">${missing.length}</div></div>
+      <div class="card ${okCount ? "ok" : ""}"><div class="k">${isDry ? "待下载" : "已下载"}</div><div class="v">${isDry ? Object.keys(matched).length : okCount}</div></div>
+      <div class="card ${notFound.length ? "err" : ""}"><div class="k">站内未找到</div><div class="v">${notFound.length}</div></div>
+      ${existCount ? `<div class="card"><div class="k">已存在</div><div class="v">${existCount}</div></div>` : ""}
+      ${failCount ? `<div class="card err"><div class="k">失败</div><div class="v">${failCount}</div></div>` : ""}
+    </div>`;
+
+  let rows = "";
+  for (const name of missing) {
+    const dl = downloads.filter(x => x.name === name);
+    let status = `<span class="tag wait">待下载</span>`;
+    if (dl.length) {
+      if (dl.some(x => x.status === "downloaded")) status = `<span class="tag ok">已下载</span>`;
+      else if (dl.some(x => x.status === "exists")) status = `<span class="tag ok">已存在</span>`;
+      else if (dl.some(x => x.status === "failed")) status = `<span class="tag no">下载失败</span>`;
+      else status = `<span class="tag wait">跳过</span>`;
+    } else if (isDry && matched[name]) status = `<span class="tag wait">待下载</span>`;
+    else if (!matched[name]) status = `<span class="tag no">未找到</span>`;
+    const files = dl.length ? dl.map(x => x.file || x.source || "").filter(Boolean).join("<br>") : (matched[name] || "—");
+    rows += `<tr><td>${esc(name)}</td><td>${status}</td><td class="mono">${esc(files)}</td></tr>`;
+  }
+  const table = missing.length ? `
+    <table><thead><tr><th style="width:32%">字幕里的字体名</th><th style="width:14%">状态</th><th>站点路径 / 本地文件</th></tr></thead>
+    <tbody>${rows}</tbody></table>` : `<div class="empty">没有缺失字体 ✓</div>`;
+
+  out.innerHTML = cards + table;
+  $("btnOpenOut").disabled = !(rep.downloads && rep.downloads.length) && !state.out_dir;
+  $("btnReport").disabled = false;
+}
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+// ---------- 运行 ----------
+async function start(dry) {
+  if (!state.ass_dir) {
+    toast("请先选择字幕目录（放 .ass/.ssa 的那个文件夹）");
+    pick("dir", "", "选择字幕目录", p => applyPick("assDir", p));
+    return;
+  }
+  if (!state.out_dir) {
+    toast("请选择「下载保存到」的文件夹：下载下来的字体文件会放在这里");
+    pick("dir", state.ass_dir, "选择字体保存文件夹", p => applyPick("outDir", p));
+    return;
+  }
+  since = 0; lastResult = null;
+  $("log").innerHTML = ""; $("result").innerHTML = "";
+  $("btnReport").disabled = true; $("btnOpenOut").disabled = true;
+  const body = {
+    ass_dir: state.ass_dir, out_dir: state.out_dir, font_dirs: state.font_dirs,
+    scope: $("scope").value, variants: $("variants").value,
+    no_system: $("optSystem").checked ? false : true,
+    keep_tree: $("optTree").checked, force: $("optForce").checked,
+    refresh_index: $("optRefresh").checked, aliases: state.aliases,
+    dry_run: dry,
+  };
+  try {
+    const r = await api("/api/start", { method: "POST", body: JSON.stringify(body) });
+    const d = await r.json();
+    if (d.error) { toast(d.error); return; }
+    setRunning(true, dry ? "分析中…" : "下载中…");
+    addLog([dry ? "开始分析（不会下载）…" : "开始下载…"]);
+    startPoll();
+  } catch (e) { toast("启动失败：" + e); }
+}
+$("btnDry").onclick = () => start(true);
+$("btnRun").onclick = () => start(false);
+$("btnStop").onclick = async () => {
+  const r = await api("/api/stop", { method: "POST" });
+  await r.json(); toast("已请求停止");
+};
+$("btnOpenOut").onclick = async () => {
+  const p = state.out_dir; if (!p) return;
+  const r = await api("/api/open", { method: "POST", body: JSON.stringify({ path: p }) });
+  const d = await r.json(); if (d.error) toast(d.error);
+};
+$("btnReport").onclick = async () => {
+  const r = await api("/api/report");
+  if (!r.ok) { toast("还没有可导出的报告"); return; }
+  const blob = await r.blob();
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = "font_report.json"; a.click();
+  URL.revokeObjectURL(a.href);
+};
+$("btnQuit").onclick = async () => {
+  if (!confirm("关闭本地页面服务？正在运行的任务会被终止。")) return;
+  try { await api("/api/shutdown", { method: "POST" }); } catch (e) {}
+  document.body.innerHTML = '<div style="margin:auto;color:#8b98a9;font-size:14px">服务已关闭，可以直接关掉这个标签页。</div>';
+};
+
+// ---------- 标签页 ----------
+let activeTab = "scan";
+document.querySelectorAll(".tab").forEach(tab => {
+  tab.onclick = () => {
+    document.querySelectorAll(".tab").forEach(x => x.classList.toggle("on", x === tab));
+    activeTab = tab.dataset.tab;
+    $("paneScan").classList.toggle("hidden", activeTab !== "scan");
+    $("paneSearch").classList.toggle("hidden", activeTab !== "search");
+    $("actionsScan").classList.toggle("hidden", activeTab !== "scan");
+    $("actionsSearch").classList.toggle("hidden", activeTab !== "search");
+    if (activeTab === "search") $("searchQ").focus();
+  };
+});
+
+// ---------- 搜索字体 ----------
+let searchResults = [];
+function currentSource() {
+  const el = $("sourceSel");
+  return (el && el.value) || "acgrip";
+}
+function selectedPaths() {
+  return [...document.querySelectorAll("#searchList input[type=checkbox]:checked")].map(i => i.dataset.path);
+}
+async function doSearch() {
+  const q = $("searchQ").value.trim();
+  if (!q) { toast("先输入字体名"); return; }
+  $("searchInfo").textContent = "搜索中…";
+  try {
+    const r = await api(`/api/search?q=${encodeURIComponent(q)}&limit=60&source=${encodeURIComponent(currentSource())}`);
+    const d = await r.json();
+    if (d.error) { $("searchInfo").textContent = d.error; toast(d.error); return; }
+    searchResults = d.results || [];
+    renderSearch();
+    $("searchInfo").textContent = searchResults.length
+      ? `「${q}」找到 ${searchResults.length} 个，勾选后下载`
+      : `没有找到「${q}」，换个关键词试试`;
+  } catch (e) { $("searchInfo").textContent = "搜索失败"; toast("搜索失败：" + e); }
+}
+function renderSearch() {
+  const box = $("searchList"); box.innerHTML = "";
+  if (!searchResults.length) { box.innerHTML = '<div class="empty">没有结果</div>'; return; }
+  searchResults.forEach((r, i) => {
+    const row = document.createElement("label");
+    row.className = "srow";
+    const cb = document.createElement("input");
+    cb.type = "checkbox"; cb.dataset.path = r.path; cb.checked = i < 5;
+    const name = document.createElement("span"); name.className = "fname"; name.textContent = r.file;
+    const score = document.createElement("span"); score.className = "score"; score.textContent = r.score + "分";
+    const path = document.createElement("span"); path.className = "spath"; path.textContent = r.path;
+    row.append(cb, name, score, path);
+    box.appendChild(row);
+  });
+}
+$("btnSearch").onclick = doSearch;
+$("searchQ").addEventListener("keydown", e => { if (e.key === "Enter") doSearch(); });
+$("btnSelAll").onclick = () => {
+  document.querySelectorAll("#searchList input[type=checkbox]").forEach(i => i.checked = true);
+};
+$("btnSelNone").onclick = () => {
+  document.querySelectorAll("#searchList input[type=checkbox]").forEach(i => i.checked = false);
+};
+
+async function downloadSelected() {
+  const paths = selectedPaths();
+  if (!paths.length) { toast("先勾选要下载的字体"); return; }
+  if (!state.out_dir) {
+    toast("请选择「下载保存到」的文件夹");
+    pick("dir", "", "选择字体保存文件夹", p => applyPick("outDir", p));
+    return;
+  }
+  since = 0; lastResult = null;
+  $("log").innerHTML = ""; $("result").innerHTML = "";
+  $("btnReport").disabled = true; $("btnOpenOut").disabled = true;
+  $("btnIdmAll").disabled = true; $("btnLinkAll").disabled = true;
+  try {
+    const r = await api("/api/start", { method: "POST", body: JSON.stringify({
+      paths, out_dir: state.out_dir, keep_tree: $("optTree").checked, force: $("optForce").checked, source: currentSource()
+    })});
+    const d = await r.json();
+    if (d.error) { toast(d.error); return; }
+    setRunning(true, "下载中…");
+    addLog([`开始下载 ${paths.length} 个字体…`]);
+    startPoll();
+  } catch (e) { toast("启动失败：" + e); }
+}
+$("btnDlSel").onclick = downloadSelected;
+
+// ---------- IDM ----------
+let idmAvailable = false;
+function idmBadge(info) {
+  idmAvailable = !!(info && info.available);
+  const el = $("idmBadge");
+  el.textContent = idmAvailable ? "IDM：已安装" : "IDM：未检测到";
+  el.className = "badge " + (idmAvailable ? "ok" : "warn");
+  el.title = idmAvailable ? (info.exe || "") : "没找到 IDMan.exe；可以「导出链接」后在 IDM 里从文本文件导入";
+  $("btnIdmSel").disabled = !idmAvailable;
+}
+async function sendIdm(paths) {
+  if (!idmAvailable) { toast("没检测到 IDM，可以先「导出链接」再手动导入"); return; }
+  if (!paths.length) { toast("没有选中的字体"); return; }
+  if (!state.out_dir) { toast("请先选择「下载保存到」的文件夹"); return; }
+  try {
+    const r = await api("/api/idm", { method: "POST", body: JSON.stringify({ paths, out_dir: state.out_dir, source: currentSource() }) });
+    const d = await r.json();
+    if (d.error) { toast(d.error, 5000); return; }
+    toast(`已把 ${d.sent} 个任务交给 IDM，进度请在 IDM 里查看`, 6000);
+  } catch (e) { toast("调用 IDM 失败：" + e); }
+}
+async function exportLinks(paths) {
+  if (!paths.length) { toast("没有可导出的字体"); return; }
+  const r = await api("/api/links", { method: "POST", body: JSON.stringify({ paths, source: currentSource() }) });
+  const d = await r.json();
+  if (d.error) { toast(d.error); return; }
+  const text = (d.links || []).map(x => x.url).join("\r\n") + "\r\n";
+  const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "font_links.txt";
+  a.click();
+  URL.revokeObjectURL(a.href);
+  toast(`已导出 ${(d.links || []).length} 条链接，可在 IDM「任务 → 从文本文件导入」`, 6000);
+}
+$("btnIdmSel").onclick = () => sendIdm(selectedPaths());
+$("btnExportSel").onclick = () => exportLinks(selectedPaths());
+
+function lastPaths() {
+  if (!lastResult) return [];
+  const set = new Set();
+  Object.values(lastResult.matched || {}).forEach(p => p && set.add(p));
+  (lastResult.downloads || []).forEach(x => x && x.source && set.add(x.source));
+  return [...set];
+}
+$("btnIdmAll").onclick = () => sendIdm(lastPaths());
+$("btnLinkAll").onclick = () => exportLinks(lastPaths());
+
+// ---------- 进度 ----------
+function fmtBytes(n) {
+  if (!n) return "0 B";
+  const u = ["B", "KB", "MB", "GB"]; let i = 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return (i === 0 ? n.toFixed(0) : n.toFixed(1)) + " " + u[i];
+}
+function fmtSpeed(v) { return v ? fmtBytes(v) + "/s" : ""; }
+function renderProgress(p) {
+  const box = $("progBox");
+  if (!p || (!p.files || !p.files.length) && !p.total) { box.classList.remove("on"); return; }
+  const files = p.files || [];
+  const total = p.total || files.length;
+  const done = p.done || 0;
+  box.classList.add("on");
+  $("progText").innerHTML = `已完成 <b>${done}</b> / ${total} 个字体`;
+  $("progBytes").textContent = p.bytes_total ? `${fmtBytes(p.bytes_done)} / ${fmtBytes(p.bytes_total)}` : "";
+  $("progFill").style.width = (total ? Math.round(done * 100 / total) : 0) + "%";
+  const list = $("pfiles");
+  list.innerHTML = "";
+  files.forEach(f => {
+    const finished = f.status === "downloaded" || f.status === "exists";
+    const failed = f.status === "failed";
+    const row = document.createElement("div");
+    row.className = "pf" + (finished ? " done" : failed ? " fail" : "");
+    const n = document.createElement("span"); n.className = "n"; n.textContent = f.file;
+    const s = document.createElement("span"); s.className = "s";
+    const bar = document.createElement("span"); bar.className = "b";
+    const fill = document.createElement("i");
+    bar.appendChild(fill);
+    const pct = f.total ? Math.min(100, Math.round(f.done * 100 / f.total)) : (finished ? 100 : 0);
+    fill.style.width = pct + "%";
+    if (f.status === "downloaded") s.textContent = `✓ ${fmtBytes(f.done)}`;
+    else if (f.status === "exists") s.textContent = "已存在";
+    else if (f.status === "failed") s.textContent = "失败";
+    else if (f.status === "running") s.textContent = `${pct}%${f.total ? " · " + fmtBytes(f.done) + " / " + fmtBytes(f.total) : ""}${f.speed ? " · " + fmtSpeed(f.speed) : ""}`;
+    else s.textContent = "等待";
+    row.append(n, s, bar);
+    list.appendChild(row);
+  });
+}
+
+// ---------- 导入字幕包 ----------
+$("btnImport").onclick = async () => {
+  const src = $("zipSrc").value.trim();
+  if (!src) { toast("先填 zip 路径或下载链接"); return; }
+  const btn = $("btnImport");
+  btn.disabled = true; btn.textContent = "导入中…";
+  try {
+    const r = await api("/api/import", { method: "POST", body: JSON.stringify({ src }) });
+    const d = await r.json();
+    if (d.error) { toast(d.error, 7000); return; }
+    applyPick("assDir", d.dir);
+    toast(`已解出 ${d.count} 个字幕文件，开始分析…`, 4000);
+    start(true);
+  } catch (e) {
+    toast("导入失败：" + e, 6000);
+  } finally {
+    btn.disabled = false; btn.textContent = "导入并分析";
+  }
+};
+
+// ---------- 诊断 ----------
+$("btnDiag").onclick = async () => {
+  try {
+    const r = await api("/api/diag");
+    const d = await r.json();
+    $("diagBody").textContent = JSON.stringify(d, null, 2);
+    $("diag").classList.add("on");
+  } catch (e) { toast("读取诊断信息失败：" + e); }
+};
+
+// ---------- 初始化 ----------
+async function init() {
+  try {
+    const pr = await fetch("/api/ping");
+    if (!pr.ok) throw new Error("HTTP " + pr.status);
+    const pi = await pr.json();
+    if (PAGE_VERSION && pi.version && pi.version !== PAGE_VERSION) {
+      showStale(`页面版本 ${PAGE_VERSION}，服务版本 ${pi.version}：这是旧页面，请重新打开。`);
+      return;
+    }
+  } catch (e) {
+    showStale("连不上本地服务（可能已经关掉了）。请重新双击 start_gui.bat，用新地址打开。");
+    return;
+  }
+  try {
+    const r = await api("/api/status");
+    const d = await r.json();
+    const idx = d.index || {};
+    const badge = $("idxBadge");
+    if (!idx.exists) {
+      badge.className = "badge warn";
+      badge.innerHTML = "索引：<b>缺失</b> · 首次运行会重建";
+    } else {
+      badge.className = "badge ok";
+      badge.innerHTML = `索引：<b>${idx.fonts}</b> 个字体 · ${idx.scope} · ${idx.generated || "?"}`;
+    }
+    if (d.job && d.job.running) {
+      since = 0; setRunning(true, "已有任务在跑…"); startPoll();
+    }
+    idmBadge(d.idm);
+    $("btnIdmSel").disabled = !idmAvailable;
+    const srcs = d.sources || [];
+    const sel = $("sourceSel");
+    sel.innerHTML = "";
+    srcs.forEach(s => {
+      const o = document.createElement("option");
+      o.value = s.name;
+      o.textContent = s.label + (s.indexed ? "" : "（未索引）");
+      if (!s.indexed) o.disabled = true;
+      sel.appendChild(o);
+    });
+    if (srcs.length <= 1) sel.classList.add("hidden");
+  } catch (e) {
+    toast("连不上本地服务：" + e);
+  }
+}
+init();
+window.addEventListener("beforeunload", () => { try { saveState(); } catch (e) {} });
+</script>
+
+</body>
+</html>
