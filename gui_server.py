@@ -180,7 +180,13 @@ def sources_info() -> list[dict]:
                 fonts = len(json.loads(path.read_text(encoding="utf-8")).get("files", []))
             except Exception:  # noqa: BLE001
                 fonts = -1
-        out.append({"name": src["name"], "label": src["label"], "indexed": path.exists(), "fonts": fonts})
+        is_search = src.get("type") == "zhaozi"
+        out.append({
+            "name": src["name"], "label": src["label"],
+            "indexed": path.exists(), "fonts": fonts,
+            "searchable": path.exists() or is_search,
+            "type": src.get("type", "index"),
+        })
     return out
 
 
@@ -200,6 +206,16 @@ def get_catalog(source: str | None = None):
 
 
 def search_fonts(q: str, limit: int = 30, source: str | None = None) -> list[dict]:
+    src = core.get_source(source)
+    if src.get("type") == "zhaozi":
+        q = (q or "").strip()
+        if not q:
+            return []
+        return [
+            {"path": item["path"], "file": item["file"], "score": item["score"],
+             "size": 0, "names": item.get("names", []), "origin": "zhaozi"}
+            for item in core.zhaozi_search(q, src["base"])[:limit]
+        ]
     catalog = get_catalog(source)
     if catalog is None:
         raise JobError("这个字体源还没有索引，先重建一次索引，或换回 acgrip")
@@ -250,12 +266,29 @@ def font_url(rel: str, source: str | None = None) -> str:
     return core.source_url(core.source_base(source), rel)
 
 
-def links_for(paths: list[str], source: str | None = None) -> list[dict]:
-    return [
-        {"path": p, "file": os.path.basename(p), "url": font_url(p, source)}
-        for p in paths
-        if p
-    ]
+def links_for(paths: list[str], source: str | None = None, all_files: bool = False) -> list[dict]:
+    """把选中的条目转成真正的文件下载链接。
+
+    找字网的详情页里可能挂着同款的多个文件；默认只取一个（名字最像正规字体名的那个，
+    也就是下载时默认下的那个），只有显式 all_files=True 才全部返回。
+    """
+    out: list[dict] = []
+    for p in paths:
+        if not p:
+            continue
+        if "zhaozi.org" in p and p.lower().endswith((".htm", ".html")):
+            try:
+                links = core.zhaozi_links(p)
+            except Exception:  # noqa: BLE001
+                continue
+            if not all_files:
+                picked = core.pick_zhaozi_file(links)
+                links = [picked] if picked else []
+            for url, fname in links:
+                out.append({"path": p, "file": fname, "url": url})
+        else:
+            out.append({"path": p, "file": os.path.basename(p), "url": font_url(p, source)})
+    return out
 
 
 def import_subtitles(src: str) -> dict:
@@ -293,18 +326,17 @@ def import_subtitles(src: str) -> dict:
     }
 
 
-def send_to_idm(paths: list[str], out_dir: str, source: str | None = None) -> dict:
+def send_to_idm(paths: list[str], out_dir: str, source: str | None = None, all_files: bool = False) -> dict:
     st = idm_status()
     if not st["available"]:
         raise JobError("没找到 IDM（IDMan.exe）。可以先「导出链接列表」，在 IDM 里用「从文本文件导入」。")
     target = Path(out_dir).expanduser()
     target.mkdir(parents=True, exist_ok=True)
     items = []
-    for rel in paths:
-        url = font_url(rel, source)
-        name = os.path.basename(rel)
+    for entry in links_for(paths, source, all_files):
+        url, name = entry["url"], entry["file"]
         subprocess.run(
-            [st["exe"], "/n", "/d", url, "/p", str(target), "/f", name],
+            [st["exe"], "/n", "/d", url, "/p", str(target), "/f", core.safe_filename(name)],
             timeout=30,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
@@ -420,6 +452,7 @@ def build_command(body: dict) -> list[str]:
         ("--force", "force"),
         ("--keep-tree", "keep_tree"),
         ("--no-system", "no_system"),
+        ("--no-zhaozi", "no_zhaozi"),
         ("--refresh-index", "refresh_index"),
     ):
         if body.get(key):
@@ -739,6 +772,25 @@ class Handler(BaseHTTPRequestHandler):
                     "results": search_fonts(qs.get("q", [""])[0], int(qs.get("limit", ["40"])[0]), src),
                 })
                 return
+            if path == "/api/zl":
+                detail = qs.get("url", [""])[0]
+                if not detail or "zhaozi.org" not in detail:
+                    self._err("不是找字网的字体页")
+                    return
+                try:
+                    links = core.zhaozi_links(detail)
+                except Exception as exc:  # noqa: BLE001
+                    self._err(f"读取失败：{exc}")
+                    return
+                ordered = sorted(links, key=lambda x: (core._filename_quality(x[1]), len(x[1])))
+                self._json({
+                    "url": detail,
+                    "files": [
+                        {"file": fname, "url": url, "default": i == 0}
+                        for i, (url, fname) in enumerate(ordered)
+                    ],
+                })
+                return
             if path == "/api/link":
                 rel = qs.get("path", [""])[0]
                 if not rel:
@@ -789,13 +841,15 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": True})
                 return
             if path == "/api/links":
-                self._json({"links": links_for(body.get("paths") or [], body.get("source"))})
+                self._json({"links": links_for(body.get("paths") or [], body.get("source"),
+                                               bool(body.get("all_files")))})
                 return
             if path == "/api/import":
                 self._json(import_subtitles(body.get("src", "")))
                 return
             if path == "/api/idm":
-                self._json(send_to_idm(body.get("paths") or [], body.get("out_dir", ""), body.get("source")))
+                self._json(send_to_idm(body.get("paths") or [], body.get("out_dir", ""),
+                                       body.get("source"), bool(body.get("all_files"))))
                 return
             if path == "/api/shutdown":
                 self._json({"ok": True})

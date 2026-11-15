@@ -34,6 +34,13 @@ python gui_server.py --port 9000
 - **IDM 支持**：右上角会显示 IDM 是否安装；装了就点「用 IDM 下载」，脚本会把
   下载链接按 `/d URL /p 目录 /f 文件名` 交给 IDMan.exe，进度在 IDM 里看；
   没装也能「导出链接」，得到 `font_links.txt`，IDM 里「任务 → 从文本文件导入」即可；
+- **扫描也会用找字网**：acgrip 匹配不到时自动去「找字网」再搜一次（结果里标「（找字网）」），
+  两个源分开匹配、互不覆盖；不需要可在选项里关掉；
+- **找字网多文件**：找字网一个字体常带多个文件（不同字重、不同来源）。默认只下**一个**
+  （名字最像正规字体名、且跳过 Bold/Italic 的那个）；「用 IDM 下载」「导出链接」也默认只发这一个，
+  不会把整页文件都塞进队列。想看/想下其它文件，点「文件…」在弹窗里勾选；
+- **搜索页的「待找字体」**：扫描完会把没匹配到的字体列在「搜索字体」页顶部，可勾选/全选后
+  「批量搜索」，结果按字体分组显示；
 - **导入字幕包**：直接把 `.zip` 字幕包（或下载链接）填进去，自动解出 `.ass/.ssa` 再分析字体——
   像 `https://secure.assrt.net/download/182242/….zip` 这种字幕包就属于这一类；
 - 「仅分析」出清单，「开始下载」直接下；运行中可「停止」；
@@ -85,13 +92,34 @@ python build_exe.py
 # 产物：_dist/ass-font-fetch.exe
 ```
 
+如果双击 exe 没反应，用包里的 **`诊断启动.bat`**：它会把窗口停住并写出 `启动日志.txt`，
+把里面的内容发出来就能判断是代码问题还是被杀软/SmartScreen 拦了。
+
 `build_exe.py` 会把 `gui.html`、`acgrip_index.json`、`sources.json` 一起塞进 exe；
 打包版的 `--cli` 子命令可以当作命令行版用（`ass-font-fetch.exe --cli --search Roboto`）。
 
 ## 字体源
 
-`acgrip`（Anime 字幕论坛字体站）是内置源，索引已经随包附带。想加别的镜像站，编辑
-[`sources.json`](sources.json)：
+目前内置两个源：
+
+| 源 | 类型 | 说明 |
+|---|---|---|
+| `acgrip` | 目录索引 | Anime 字幕论坛字体站，索引随包附带（2 万多个文件） |
+| `zhaozi` | 在线搜索 | 找字网（font-c0.zhaozi.org），按名字实时搜索，详情页里直接给出下载直链；不需要索引 |
+
+用法：
+
+```bash
+# 在找字网搜
+python ass_font_fetch.py --source zhaozi --search 方正兰亭黑
+
+# 直接下载找字网详情页里的字体（会自动挑一个正经文件名，跳过 Bold/Italic 变体）
+python ass_font_fetch.py --download "https://font-09.zhaozi.org/0/9/098b….htm" --out E:\FontPack
+```
+
+GUI 里「搜索字体」页的字体源下拉框会多出「找字网（在线搜索）」。
+
+想再加别的**目录型**镜像站，编辑 [`sources.json`](sources.json)：
 
 ```json
 {
@@ -178,12 +206,16 @@ python ass_font_fetch.py --download "LPSub Fonts/2023-12-24/Roboto-Medium.ttf" -
    和注册表字体项；其它平台用 `fc-list` 兜底。每个字体文件都会解析 sfnt `name` 表，取出
    family / typographic family / full name / PostScript 名（含中日繁各语言名），所以
    「文件名是 `SourceHanSansCN-Bold.ttf`、显示名是 `思源黑体 CN`」这种情况也能认出来。
-3. **比对**：字体名统一做全角转半角、小写、去空格/下划线/连字符/点后比较；还会去掉末尾字重词
-   （Bold/Medium/Light…）做「同族」比较，避免字幕写 `思源黑体 CN Bold`、字体实际 family 只有
-   `思源黑体 CN` 时误报缺失。
-4. **下载**：把缺失字体名和站内索引里的文件名做多级匹配（完全相同 → 同族 → 包含 → 相似度），
-   取最高分的文件下载；`--variants all` 会把同族所有字重一起下。下载后会校验文件魔数，
-   非字体内容直接丢弃。
+3. **比对**：字体名统一做全角转半角、小写、去空格/下划线/连字符/点后比较；再去掉末尾字重词
+   （Bold/Medium/Light…）做「同族」比较；还会忽略结尾的编码后缀（`_GBK`/`-GB18030`/`_BIG5`）
+   和地区后缀（CN/TC/SC/HK…，仅作低分兜底，避免把繁体当成简体）。这样
+   `Source Han Sans` ↔ `SourceHanSansCN-Regular`、`方正兰亭黑` ↔ `方正兰亭黑_GB18030`
+   都能配上。
+4. **匹配分两轮**：先把所有缺失字体统一在 acgrip 里匹配；acgrip 都没找到的，再**统一**拿到
+   「找字网」按名字搜一次（结果里标「（找字网）」）。两站的匹配逻辑互不干扰。
+5. **下载**：acgrip 命中就下站内文件；找字网命中则默认只下详情页里的**第一个**文件
+   （按文件名质量排序，优先正规名、跳过 Bold/Italic）。同一字体在找字网可能有好几个文件，
+   页面上点「文件…」可以看到全部并手动勾选下载。下载后都会校验文件魔数，非字体内容丢弃。
 
 索引的结构就是站点目录的 BFS 结果（`?dir=` 逐层抓取），存成
 `{"version":1,"scope":"lite","files":["LPSub Fonts/.../xxx.ttf", ...]}`。

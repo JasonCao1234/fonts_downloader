@@ -213,6 +213,17 @@
       </div>
 
       <div class="pane hidden" id="paneSearch">
+        <div class="field" id="pendingBox" style="display:none">
+          <label>扫描时没匹配到的字体（勾选后批量搜）</label>
+          <div class="searchbar">
+            <span id="pendingInfo">—</span>
+            <span class="spacer" style="flex:1"></span>
+            <button class="ghost small" id="btnPendingAll">全选</button>
+            <button class="ghost small" id="btnPendingNone">清空</button>
+            <button class="ghost small" id="btnPendingSearch">批量搜索</button>
+          </div>
+          <div class="searchlist" id="pendingList" style="max-height:150px"></div>
+        </div>
         <div class="field">
           <label>输入字体名搜索（中英文都行，支持模糊匹配）</label>
           <div class="row">
@@ -267,6 +278,7 @@
         <label class="opt chk"><input type="checkbox" id="optTree"><span class="t">保留站点目录层级</span><span class="d">默认平铺到输出目录</span></label>
         <label class="opt chk"><input type="checkbox" id="optForce"><span class="t">已存在也重新下载</span><span class="d">覆盖输出目录里的同名文件</span></label>
         <label class="opt chk"><input type="checkbox" id="optRefresh"><span class="t">重建站内索引</span><span class="d">较慢，索引过期时才需要</span></label>
+        <label class="opt chk"><input type="checkbox" id="optZhaozi" checked><span class="t">acgrip 没有就去「找字网」兜底</span><span class="d">两个源分开匹配，不会互相覆盖</span></label>
       </div>
 
       <div class="field">
@@ -327,6 +339,21 @@
   </div>
 </div>
 
+<div class="modal" id="zl">
+  <div class="dlg" style="height:auto;max-width:780px">
+    <div class="hd"><b>找字网 · 选择要下载的文件</b><span class="spacer" style="flex:1"></span>
+      <button class="ghost small" id="zlClose">✕</button></div>
+    <div style="padding:10px 16px;font-size:12px;color:#8b98a9">
+      默认只下第一个；同款字体如果有多个字重，可以勾选其它一起下。
+    </div>
+    <div class="searchlist" id="zlList" style="max-height:52vh;margin:0 16px"></div>
+    <div class="actions" style="padding:12px 16px">
+      <button id="zlAll">全选</button>
+      <button class="primary" id="zlDl">下载勾选</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <div class="modal" id="stale">
@@ -373,7 +400,8 @@ $("diagClose").onclick = () => $("diag").classList.remove("on");
 const LS = "assFontFetch.gui.v1";
 let state = {
   ass_dir: "", out_dir: "", font_dirs: [], scope: "lite", variants: "base",
-  no_system: false, keep_tree: false, force: false, refresh_index: false, aliases: ""
+  no_system: false, keep_tree: false, force: false, refresh_index: false, aliases: "",
+  zhaozi: true
 };
 try { Object.assign(state, JSON.parse(localStorage.getItem(LS) || "{}")); } catch (e) {}
 // 兼容早期版本误把 DOM id 当键存下的记录
@@ -398,7 +426,7 @@ bind("outDir", "out_dir");
 bind("aliases", "aliases");
 bind("scope", "scope", "change");
 bind("variants", "variants", "change");
-const checks = { optSystem: ["no_system", v => !v], optTree: ["keep_tree"], optForce: ["force"], optRefresh: ["refresh_index"] };
+const checks = { optSystem: ["no_system", v => !v], optTree: ["keep_tree"], optForce: ["force"], optRefresh: ["refresh_index"], optZhaozi: ["zhaozi"] };
 for (const [id, [key, invert]] of Object.entries(checks)) {
   const el = $(id);
   el.checked = invert ? !state[key] : !!state[key];
@@ -639,6 +667,7 @@ function renderDirect(rep) {
 
 function renderResult(rep, isDry) {
   $("emptyHint") && $("emptyHint").remove();
+  renderPending(rep);
   if (rep.mode === "direct") { renderDirect(rep); return; }
   const out = $("result");
   const downloads = rep.downloads || [];
@@ -672,13 +701,18 @@ function renderResult(rep, isDry) {
     } else if (isDry && matched[name]) status = `<span class="tag wait">待下载</span>`;
     else if (!matched[name]) status = `<span class="tag no">未找到</span>`;
     const files = dl.length ? dl.map(x => x.file || x.source || "").filter(Boolean).join("<br>") : (matched[name] || "—");
-    rows += `<tr><td>${esc(name)}</td><td>${status}</td><td class="mono">${esc(files)}</td></tr>`;
+    const isZ = /^https?:\/\/.*zhaozi\.org/i.test(matched[name] || "");
+    const extra = isZ ? ` <button class="ghost small" data-zl="${esc(matched[name])}">文件…</button>` : "";
+    rows += `<tr><td>${esc(name)}</td><td>${status}</td><td class="mono">${esc(files)}${extra}</td></tr>`;
   }
   const table = missing.length ? `
     <table><thead><tr><th style="width:32%">字幕里的字体名</th><th style="width:14%">状态</th><th>站点路径 / 本地文件</th></tr></thead>
     <tbody>${rows}</tbody></table>` : `<div class="empty">没有缺失字体 ✓</div>`;
 
   out.innerHTML = cards + table;
+  out.querySelectorAll("[data-zl]").forEach(b => {
+    b.onclick = (ev) => { ev.preventDefault(); openZL(b.dataset.zl); };
+  });
   $("btnOpenOut").disabled = !(rep.downloads && rep.downloads.length) && !state.out_dir;
   $("btnReport").disabled = false;
 }
@@ -707,7 +741,7 @@ async function start(dry) {
     no_system: $("optSystem").checked ? false : true,
     keep_tree: $("optTree").checked, force: $("optForce").checked,
     refresh_index: $("optRefresh").checked, aliases: state.aliases,
-    dry_run: dry,
+    no_zhaozi: !$("optZhaozi").checked, dry_run: dry,
   };
   try {
     const r = await api("/api/start", { method: "POST", body: JSON.stringify(body) });
@@ -784,13 +818,28 @@ async function doSearch() {
 function renderSearch() {
   const box = $("searchList"); box.innerHTML = "";
   if (!searchResults.length) { box.innerHTML = '<div class="empty">没有结果</div>'; return; }
+  let lastQuery = null;
   searchResults.forEach((r, i) => {
+    if (r.query && r.query !== lastQuery) {
+      lastQuery = r.query;
+      const head = document.createElement("div");
+      head.className = "hint";
+      head.style.padding = "5px 9px";
+      head.textContent = "待找字体：" + r.query;
+      box.appendChild(head);
+    }
     const row = document.createElement("label");
     row.className = "srow";
     const cb = document.createElement("input");
     cb.type = "checkbox"; cb.dataset.path = r.path; cb.checked = i < 5;
     const name = document.createElement("span"); name.className = "fname"; name.textContent = r.file;
     const score = document.createElement("span"); score.className = "score"; score.textContent = r.score + "分";
+    if (r.path && /zhaozi\.org/i.test(r.path)) {
+      score.textContent = r.score + "分 · 文件…";
+      score.style.cursor = "pointer";
+      score.title = "查看这个字体在找字网里的所有文件";
+      score.onclick = (ev) => { ev.preventDefault(); ev.stopPropagation(); openZL(r.path); };
+    }
     const path = document.createElement("span"); path.className = "spath"; path.textContent = r.path;
     row.append(cb, name, score, path);
     box.appendChild(row);
@@ -803,6 +852,88 @@ $("btnSelAll").onclick = () => {
 };
 $("btnSelNone").onclick = () => {
   document.querySelectorAll("#searchList input[type=checkbox]").forEach(i => i.checked = false);
+};
+
+// ---------- 找字网多文件 ----------
+async function openZL(url) {
+  $("zlList").innerHTML = '<div class="empty">读取中…</div>';
+  $("zl").classList.add("on");
+  try {
+    const r = await api(`/api/zl?url=${encodeURIComponent(url)}`);
+    const d = await r.json();
+    if (d.error) { $("zlList").innerHTML = `<div class="empty">${esc(d.error)}</div>`; return; }
+    const box = $("zlList"); box.innerHTML = "";
+    (d.files || []).forEach(f => {
+      const row = document.createElement("label");
+      row.className = "srow";
+      const cb = document.createElement("input");
+      cb.type = "checkbox"; cb.dataset.url = f.url; cb.checked = !!f.default;
+      const name = document.createElement("span"); name.className = "fname"; name.textContent = f.file;
+      const tag = document.createElement("span"); tag.className = "score";
+      tag.textContent = f.default ? "默认" : "";
+      row.append(cb, name, tag);
+      box.appendChild(row);
+    });
+    if (!(d.files || []).length) box.innerHTML = '<div class="empty">没有可下载的文件</div>';
+  } catch (e) {
+    $("zlList").innerHTML = `<div class="empty">读取失败：${esc(String(e))}</div>`;
+  }
+}
+$("zlClose").onclick = () => $("zl").classList.remove("on");
+$("zlAll").onclick = () => document.querySelectorAll("#zlList input").forEach(i => i.checked = true);
+$("zlDl").onclick = async () => {
+  const urls = [...document.querySelectorAll("#zlList input:checked")].map(i => i.dataset.url);
+  if (!urls.length) { toast("先勾选要下载的文件"); return; }
+  if (!state.out_dir) { toast("请先选择「下载保存到」"); return; }
+  $("zl").classList.remove("on");
+  since = 0; lastResult = null;
+  $("log").innerHTML = ""; $("result").innerHTML = "";
+  try {
+    const r = await api("/api/start", { method: "POST", body: JSON.stringify({
+      paths: urls, out_dir: state.out_dir, keep_tree: $("optTree").checked, force: $("optForce").checked
+    })});
+    const d = await r.json();
+    if (d.error) { toast(d.error); return; }
+    setRunning(true, "下载中…"); addLog([`开始下载 ${urls.length} 个文件…`]); startPoll();
+  } catch (e) { toast("启动失败：" + e); }
+};
+
+// ---------- 待找字体（扫描时没匹配到的） ----------
+let pendingNames = [];
+function renderPending(rep) {
+  pendingNames = (rep && rep.missing) || [];
+  const box = $("pendingBox"), list = $("pendingList");
+  if (!pendingNames.length) { box.style.display = "none"; return; }
+  box.style.display = "";
+  list.innerHTML = "";
+  pendingNames.forEach((n, i) => {
+    const row = document.createElement("label");
+    row.className = "srow";
+    const cb = document.createElement("input");
+    cb.type = "checkbox"; cb.dataset.name = n; cb.checked = i < 5;
+    const name = document.createElement("span"); name.className = "fname"; name.textContent = n;
+    row.append(cb, name);
+    list.appendChild(row);
+  });
+  $("pendingInfo").textContent = `${pendingNames.length} 个待找`;
+}
+$("btnPendingAll").onclick = () => document.querySelectorAll("#pendingList input").forEach(i => i.checked = true);
+$("btnPendingNone").onclick = () => document.querySelectorAll("#pendingList input").forEach(i => i.checked = false);
+$("btnPendingSearch").onclick = async () => {
+  const names = [...document.querySelectorAll("#pendingList input:checked")].map(i => i.dataset.name);
+  if (!names.length) { toast("先勾选要搜的字体"); return; }
+  const merged = [];
+  for (const name of names.slice(0, 15)) {
+    $("searchInfo").textContent = `正在批量搜索：${name}（已得 ${merged.length} 条）`;
+    try {
+      const r = await api(`/api/search?q=${encodeURIComponent(name)}&limit=6&source=${encodeURIComponent(currentSource())}`);
+      const d = await r.json();
+      (d.results || []).slice(0, 3).forEach(x => merged.push({ ...x, query: name }));
+    } catch (e) { /* 单个失败不影响其它 */ }
+  }
+  searchResults = merged;
+  renderSearch();
+  $("searchInfo").textContent = `批量搜索完成：${names.length} 个字体，命中 ${merged.length} 条`;
 };
 
 async function downloadSelected() {
@@ -987,8 +1118,8 @@ async function init() {
     srcs.forEach(s => {
       const o = document.createElement("option");
       o.value = s.name;
-      o.textContent = s.label + (s.indexed ? "" : "（未索引）");
-      if (!s.indexed) o.disabled = true;
+      o.textContent = s.label + (s.type === "zhaozi" ? "（在线搜索）" : (s.indexed ? "" : "（未索引）"));
+      if (s.searchable === false) o.disabled = true;
       sel.appendChild(o);
     });
     if (srcs.length <= 1) sel.classList.add("hidden");

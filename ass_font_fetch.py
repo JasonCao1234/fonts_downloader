@@ -46,6 +46,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
+from html import unescape as html_unescape
 from pathlib import Path
 
 FROZEN = bool(getattr(sys, "frozen", False))
@@ -129,6 +130,85 @@ def source_url(base: str, rel_path: str) -> str:
     return base + urllib.parse.quote(rel_path)
 
 
+# ---------------------------------------------------------------- 找字网 zhaozi
+# 找字网不是目录站：GET /search?q=名字 出结果，详情页里是多个
+# https://down-xx.zhaozi.org/download/...?filename=xxx.otf 的直链。
+
+def _name_score(query: str, cand: str) -> int:
+    nq, nc = normalize(query), normalize(cand)
+    if not nq or not nc:
+        return 0
+    if nq == nc:
+        return 100
+    if base_key(query) == base_key(cand):
+        return 96
+    if nq in nc or nc in nq:
+        return 85
+    if len(nq) < 3:
+        return 0
+    ratio = difflib.SequenceMatcher(None, nq, nc).ratio()
+    return int(60 + (ratio - 0.80) / 0.20 * 24) if ratio >= 0.80 else 0
+
+
+def zhaozi_search(query: str, base: str) -> list[dict]:
+    url = base.rstrip("/") + "/search?q=" + urllib.parse.quote(query)
+    html = http_get(url, retries=2, timeout=40).decode("utf-8", "replace")
+    results: list[dict] = []
+    for match in re.finditer(r'<span class="fontName"><a href="([^"]+)"[^>]*>(.*?)</a>', html, re.S):
+        detail = match.group(1).strip()
+        raw = re.sub(r"<[^>]+>", "", match.group(2))
+        names = [x.strip() for x in raw.split(",") if x.strip()]
+        if not names:
+            continue
+        best = max(names, key=lambda n: _name_score(query, n))
+        score = _name_score(query, best)
+        if score < 60:
+            continue
+        results.append(
+            {"path": detail, "file": best, "names": names, "score": score, "origin": "zhaozi"}
+        )
+    results.sort(key=lambda r: -r["score"])
+    return results
+
+
+def zhaozi_links(detail_url: str) -> list[tuple[str, str]]:
+    """详情页 → [(直链, 文件名)]。"""
+    html = http_get(detail_url, retries=2, timeout=40).decode("utf-8", "replace")
+    links: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for match in re.finditer(r'href="(https://down-[^"]+?filename=[^"]+)"', html):
+        href = html_unescape(match.group(1))
+        head, _, tail = href.partition("filename=")
+        fname = urllib.parse.unquote(tail).strip()
+        if not fname or fname in seen:
+            continue
+        seen.add(fname)
+        links.append((head + "filename=" + urllib.parse.quote(fname), fname))
+    return links
+
+
+def _filename_quality(fname: str) -> float:
+    """给站内的候选文件名打分（越小越像正经字体名）。"""
+    stem = os.path.splitext(fname)[0].strip()
+    bad = 0.0
+    if stem.startswith(("_", "-", ".", " ")):
+        bad += 3
+    bad += sum(0.6 for ch in stem if ch in "_-.") 
+    if len(stem) < 4:
+        bad += 3
+    if re.search(r"bold|italic|oblique", stem, re.I):
+        bad += 2
+    if re.search(r"[?？]{1,}", stem):
+        bad += 4
+    return bad
+
+
+def pick_zhaozi_file(links: list[tuple[str, str]]) -> tuple[str, str] | None:
+    if not links:
+        return None
+    return sorted(links, key=lambda x: (_filename_quality(x[1]), len(x[1])))[0]
+
+
 def emit(kind: str, payload: dict, enabled: bool) -> None:
     """给 GUI 用的机器可读进度行。"""
     if not enabled:
@@ -195,6 +275,33 @@ def weight_of(name: str) -> str:
         if n.endswith(w) and len(n) > len(w) + 1:
             return w
     return ""
+
+
+_ENCODING_SUFFIXES = ("gb18030", "gb2312", "gbk", "big5", "b5", "gb")
+_LANG_SUFFIXES = ("cn", "tc", "sc", "hk", "tw", "jp", "kr")
+
+
+def _strip_suffixes(name: str, suffixes: tuple[str, ...]) -> str:
+    n = base_key(name)
+    changed = True
+    while changed and len(n) > 2:
+        changed = False
+        for suf in suffixes:
+            if n.endswith(suf) and len(n) > len(suf) + 1:
+                n = n[: -len(suf)]
+                changed = True
+                break
+    return n
+
+
+def region_key(name: str) -> str:
+    """去掉结尾的编码后缀（_GBK / -GB18030 / _BIG5…），编码不同但字体相同。"""
+    return _strip_suffixes(name, _ENCODING_SUFFIXES)
+
+
+def lang_key(name: str) -> str:
+    """连地区后缀（CN/TC/SC/HK/JP…）也去掉，只作低分兜底，避免把繁体当成简体。"""
+    return _strip_suffixes(name, _ENCODING_SUFFIXES + _LANG_SUFFIXES)
 
 
 def base_key(name: str) -> str:
@@ -738,6 +845,17 @@ class SiteCatalog:
             italic = ("italic" in en or "oblique" in en) and not (
                 "italic" in n or "oblique" in n
             )
+            if len(n) >= 2 and eb != b:
+                if region_key(name) == region_key(stem):
+                    score = 93 - (3 if italic else 0)
+                    if score >= threshold:
+                        scored.append((score, path))
+                    continue
+                if lang_key(name) == lang_key(stem):
+                    score = 88 - (3 if italic else 0)
+                    if score >= threshold:
+                        scored.append((score, path))
+                    continue
             if eb == b:
                 if q_weight and c_weight == q_weight:
                     score = 96
@@ -823,8 +941,24 @@ def download_font(
     progress=None,
 ) -> tuple[str, Path, int]:
     """流式下载并回报进度。返回 (状态, 本地路径, 字节数)。状态: downloaded / exists / failed。"""
-    base = safe_filename(os.path.basename(rel_path))
-    if keep_tree:
+    if rel_path.startswith(("http://", "https://")):
+        if "zhaozi.org" in rel_path and rel_path.lower().endswith((".htm", ".html")):
+            picked = pick_zhaozi_file(zhaozi_links(rel_path))
+            if not picked:
+                return "failed", out_dir / "unknown", 0
+            url, fname = picked
+        else:
+            url = rel_path
+            parsed = urllib.parse.urlparse(rel_path)
+            fname = urllib.parse.unquote(os.path.basename(parsed.path)) or "font"
+            query = urllib.parse.parse_qs(parsed.query).get("filename")
+            if query:
+                fname = query[0]
+    else:
+        fname = os.path.basename(rel_path)
+        url = source_url(source_base(source), rel_path)
+    base = safe_filename(fname)
+    if keep_tree and not rel_path.startswith(("http://", "https://")):
         parts = [safe_filename(p) for p in rel_path.split("/") if p]
         dest = out_dir.joinpath(*parts)
     else:
@@ -832,7 +966,6 @@ def download_font(
     if dest.exists() and dest.stat().st_size > 1024 and not force:
         return "exists", dest, dest.stat().st_size
     dest.parent.mkdir(parents=True, exist_ok=True)
-    url = source_url(source_base(source), rel_path)
     tmp = dest.with_suffix(dest.suffix + ".part")
     for attempt in range(2):
         try:
@@ -848,7 +981,7 @@ def download_font(
                         fh.write(chunk)
                         done += len(chunk)
                         if progress:
-                            progress(done, total)
+                            progress(done, total, fname)
             head = tmp.read_bytes()[:4]
             if not looks_like_font(head):
                 tmp.unlink(missing_ok=True)
@@ -866,14 +999,25 @@ def progress_reporter(enabled: bool, file_name: str):
     """把下载回调节流成 @@PROGRESS 行（约 6 帧/秒）。"""
     state = {"last": 0.0}
 
-    def cb(done: int, total: int) -> None:
+    def cb(done: int, total: int, name: str | None = None) -> None:
         now = time.time()
         if now - state["last"] < 0.15 and (total <= 0 or done < total):
             return
         state["last"] = now
-        emit("PROGRESS", {"file": file_name, "done": done, "total": total}, enabled)
+        emit("PROGRESS", {"file": name or file_name, "done": done, "total": total}, enabled)
 
     return cb
+
+
+def display_name(spec: str) -> str:
+    """给 URL / 站内路径起个好看的显示名（URL 优先取 ?filename=）。"""
+    if spec.startswith(("http://", "https://")):
+        parsed = urllib.parse.urlparse(spec)
+        q = urllib.parse.parse_qs(parsed.query).get("filename")
+        if q:
+            return q[0]
+        return os.path.basename(parsed.path) or spec
+    return os.path.basename(spec)
 
 
 # ---------------------------------------------------------------- 主流程
@@ -923,6 +1067,17 @@ def split_source(spec: str, default_source: str) -> tuple[str, str]:
 
 def run_search(name: str, args, here: Path) -> int:
     src = get_source(args.source)
+    if src.get("type") == "zhaozi":
+        results = zhaozi_search(name, src["base"])
+        if not results:
+            log(f"找字网上没有匹配「{name}」的字体")
+            return 1
+        log(f"「{name}」在{src['label']}的候选：")
+        for item in results[: args.limit]:
+            names = " , ".join(item["names"][:4])
+            log(f"  {item['score']:>3}分  {names}")
+            log(f"          {item['path']}")
+        return 0
     index_path = Path(args.index).expanduser() if args.index else default_index(src["index"])
     files = ensure_index(index_path, args.scope, max(args.jobs, 1), args.refresh_index, args.max_age_days, args.verbose)
     catalog = SiteCatalog(files)
@@ -945,7 +1100,14 @@ def run_direct_download(specs: list[str], args, here: Path) -> int:
     log("== 下载选中的字体 ==")
     for idx, spec in enumerate(specs, 1):
         source_name, rel = split_source(spec, default_source)
-        fname = os.path.basename(rel)
+        fname = display_name(rel)
+        if rel.startswith("http") and "zhaozi.org" in rel and rel.lower().endswith((".htm", ".html")):
+            try:
+                picked = pick_zhaozi_file(zhaozi_links(rel))
+                if picked:
+                    fname = picked[1]
+            except Exception:  # noqa: BLE001
+                pass
         emit("FILE", {"idx": idx, "name": fname, "file": fname, "status": "start", "bytes": 0}, args.progress_json)
         cb = progress_reporter(args.progress_json, fname)
         status, dest, size = download_font(rel, out_dir, args.keep_tree, args.force, source_name, cb)
@@ -1023,6 +1185,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--force", action="store_true", help="已存在也重新下载")
     parser.add_argument("--keep-tree", action="store_true", help="保留下载站点的目录层级")
     parser.add_argument("--no-system", action="store_true", help="不读取系统已安装字体")
+    parser.add_argument("--no-zhaozi", action="store_true", help="acgrip 没匹配到时不去找字网兜底")
     parser.add_argument("--report", help="把结果写成 JSON 报告")
     parser.add_argument("--verbose", action="store_true", help="输出更多过程信息")
     args = parser.parse_args(argv)
@@ -1084,13 +1247,35 @@ def main(argv: list[str] | None = None) -> int:
     )
     catalog = SiteCatalog(site_files)
     plans: list[dict] = []
+    # 第一阶段：所有缺失字体统一在 acgrip 里找
     for name in missing:
         cands = catalog.match(name, aliases.get(name))
-        plans.append({"name": name, "candidates": cands})
+        plans.append({"name": name, "candidates": cands, "origin": "acgrip" if cands else ""})
         if cands:
             info(f"{name}  →  {cands[0][1]}  ({cands[0][0]}分)")
+
+    # 第二阶段：acgrip 没找到的，再统一去另一个站（找字网）
+    unmatched = [p for p in plans if not p["candidates"]]
+    zsrc = next((x for x in load_sources() if x.get("type") == "zhaozi"), None)
+    if unmatched:
+        if args.no_zhaozi or not zsrc:
+            log(f"  另有 {len(unmatched)} 个 acgrip 没找到（找字网兜底已关闭）")
+            for plan in unmatched:
+                info(f"{plan['name']}  →  未找到")
         else:
-            info(f"{name}  →  站内未找到")
+            log(f"== 3b/4 acgrip 没找到的 {len(unmatched)} 个，再去「{zsrc['label']}」找 ==")
+            for plan in unmatched:
+                try:
+                    zbatch = zhaozi_search(plan["name"], zsrc["base"])
+                except Exception:  # noqa: BLE001
+                    zbatch = []
+                if zbatch:
+                    plan["candidates"] = [(it["score"], it["path"]) for it in zbatch[:4]]
+                    plan["origin"] = "zhaozi"
+                    info(f"{plan['name']}  →  找字网命中 {len(zbatch)} 条，默认取第一条")
+                    info(f"      {plan['candidates'][0][1]}")
+                else:
+                    info(f"{plan['name']}  →  两站都没找到")
     found = [p for p in plans if p["candidates"]]
     not_found = [p["name"] for p in plans if not p["candidates"]]
 
@@ -1111,7 +1296,11 @@ def main(argv: list[str] | None = None) -> int:
                 results.append({"name": plan["name"], "status": "skipped", "file": None, "bytes": 0})
                 info(f"{plan['name']}  →  跳过")
                 continue
-            rels = catalog.same_family(chosen) if args.variants == "all" else [chosen]
+            rels = (
+                catalog.same_family(chosen)
+                if args.variants == "all" and not chosen.startswith("http")
+                else [chosen]
+            )
             plan_files.append((plan["name"], rels))
         emit("TOTAL", {"total": sum(len(r) for _, r in plan_files)}, args.progress_json)
         done_files = 0
