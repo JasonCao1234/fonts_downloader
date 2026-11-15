@@ -1,5 +1,7 @@
 # ass-font-fetch
+
 点击启动.bat运行
+
 扫描 ASS/SSA 字幕用到的字体 → 对比**系统已安装字体**与**指定字体文件夹** → 找出缺失的 → 从
 [pan.acgrip.com](https://pan.acgrip.com/)（Anime 字幕论坛字体下载站）自动下载到指定目录。
 
